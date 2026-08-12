@@ -1,15 +1,35 @@
-(* Safety check *)
+(* Safety *)
+IF sensor_TankCurrentTemp < safety_TempSensorMin OR sensor_TankCurrentTemp > safety_TempSensorMax THEN
+    safety_AlarmTempSensorFault := TRUE;
+END_IF
+
+IF sensor_TankCurrentLevel < safety_LevelSensorMin OR sensor_TankCurrentLevel > safety_LevelSensormax THEN
+    safety_AlarmLevelSensorFault := TRUE;
+END_IF
+
+IF sensor_TankCurrentTemp > (input_SetTankTemp + safety_OverTempMargin) THEN
+    safety_AlarmOverTemp := TRUE;
+END_IF
+
+IF sensor_TankCurrentLevel > input_SetMaxTankLevel THEN
+    safety_AlarmOverflow := sensor_TankCurrentLevel > input_SetMaxTankLevel;
+END_IF
+
+IF safety_AlarmOverTemp OR safety_AlarmOverflow OR safety_AlarmTempSensorFault OR safety_AlarmLevelSensorFault THEN
+    safety_AnyCriticalAlarm := TRUE;
+END_IF
+
 IF safety_AnyCriticalAlarm THEN
     state_EmergencyStop := TRUE;
     output_Alarm := TRUE;
     IF safety_AlarmOverTemp THEN
-        string_Alarm := '';
+        string_Alarm := 'QUÁ NHIỆT - VAN HƠI ĐÓNG KHẨN CẤP';
     ELSIF safety_AlarmOverflow THEN
-        string_Alarm := '';
+        string_Alarm := 'TRÀN MỰC BỒN - ĐÃ ĐÓNG VAN NHẬN SỐT KHẨN CẤP';
     ELSIF safety_AlarmTempSensorFault THEN
-        string_Alarm := '';
+        string_Alarm := 'CẢM BIẾN NHIỆT ĐỘ LỖI';
     ELSIF safety_AlarmLevelSensorFault THEN
-        string_Alarm := '';
+        string_Alarm := 'CẢM BIẾN MỰC BỒN LỖI';
     END_IF
 END_IF
 
@@ -60,7 +80,10 @@ IF button_Reset AND state_EmergencyStop AND NOT safety_AnyCriticalAlarm THEN
     state_StateOfOp := 0;
 END_IF
 
-maintenance_ManualModeActive := maintenance_ManualMode AND (state_StateOfOp = 0) AND NOT state_EmergencyStop;
+(* Maintenance *)
+IF maintenance_ManualMode AND (state_StateOfOp = 0) AND NOT state_EmergencyStop THEN
+    maintenance_ManualModeActive := TRUE;
+END_IF
 
 (* Main function *)
 IF state_IsPaused OR state_EmergencyStop THEN
@@ -92,20 +115,21 @@ IF state_IsPaused OR state_EmergencyStop THEN
                 Enable := FALSE);
     PID_Output := 0.0;
 ELSIF maintenance_ManualModeActive THEN
-    string_Normal := '';
+    string_Normal := 'CHẾ ĐỘ BẢO TRÌ (MANUAL) - ĐANG ĐIỀU KHIỂN TAY';
     
     IF maintenance_ManualOilPump AND maintenance_ManualDrainValve THEN
         output_OilPump := FALSE;
         output_DrainValve := FALSE;
         output_Alarm := TRUE;
-        string_Alarm := '';
+        string_Alarm := 'MANUAL: KHÔNG THỂ BƠM DẦU VÀ XẢ ĐÁY CÙNG LÚC';
     ELSE
         output_OilPump := maintenance_ManualOilPump;
         output_DrainValve := maintenance_ManualDrainValve;
     END_IF
 
-    output_Motor := maintenance_ManualMotor AND (sensor_TankCurrentLevel > safety_MinLevelForMotor);
-
+    IF maintenance_ManualMotor AND (sensor_TankCurrentLevel > safety_MinLevelForMotor) THEN
+        output_Motor := TRUE;
+    END_IF
     output_SteamValve := maintenance_ManualSteamValve;
 
     PID_Heating(SetPoint := input_SetTankTemp,
@@ -173,7 +197,7 @@ ELSE
                 safety_AlarmState1Timeout := TRUE;
                 state_EmergencyStop := TRUE;
                 output_Alarm := TRUE;
-                string_Alarm := '';
+                string_Alarm := 'CHỜ NHẬN SỐT QUÁ LÂU - KIỂM TRA BỒN NẤU / ĐƯỜNG ỐNG DẪN';
             END_IF
 
             IF sensor_TankCurrentLevel < input_SetOilLevel THEN
@@ -198,7 +222,7 @@ ELSE
             IF timer_IngredientWaitTimeout.Q THEN
                 safety_AlarmIngredientTimeout := TRUE;
                 output_Alarm := TRUE;
-                string_Alarm := '';
+                string_Alarm := 'QUÁ THỜI GIAN CHỜ NGUYÊN LIỆU';
             END_IF
 
             IF button_ConfirmIngredient THEN
@@ -228,14 +252,14 @@ ELSE
 
         4: (* Heating *)
             string_Normal := 'BẮT ĐẦU QUÁ TRÌNH GIA NHIỆT';
-            output_Motor := sensor_TankCurrentLevel > safety_MinLevelForMotor; // Implement for inverter
+            output_Motor := sensor_TankCurrentLevel > safety_MinLevelForMotor;
 
             timer_State4Timeout(IN := TRUE, PT := safety_State4TimeoutSet);
             IF timer_State4Timeout.Q THEN
                 safety_AlarmState4Timeout := TRUE;
                 state_EmergencyStop := TRUE;
                 output_Alarm := TRUE;
-                string_Alarm := '';
+                string_Alarm := 'GIA NHIỆT QUÁ LÂU - KIỂM TRA NGUỒN HƠI';
             END_IF
 
             IF pulse_TimerOneSec THEN
@@ -304,7 +328,7 @@ ELSE
             safety_AlarmState6Timeout := TRUE;
             state_EmergencyStop := TRUE;
             output_Alarm := TRUE;
-            string_Alarm := '';
+            string_Alarm := 'QUÁ THỜI GIAN XẢ - KIỂM TRA ĐƯỜNG ỐNG DẪN';
         END_IF
 
         IF sensor_TankCurrentLevel <= 5 THEN
@@ -320,6 +344,7 @@ ELSE
     END_CASE
 END_IF
 
+(* Simulate *)
 IF simulate_SimMode THEN
     simulate_TankLevelSim(OilPumpActive := output_OilPump,
                           IngredientTrigger := button_ConfirmIngredient,
